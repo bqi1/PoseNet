@@ -21,22 +21,8 @@ import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.ImageFormat
-import android.graphics.Matrix
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.Rect
-import android.hardware.camera2.CameraAccessException
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraDevice
-import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.CaptureResult
-import android.hardware.camera2.TotalCaptureResult
+import android.graphics.*
+import android.hardware.camera2.*
 import android.media.Image
 import android.media.ImageReader
 import android.media.ImageReader.OnImageAvailableListener
@@ -44,25 +30,20 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
-import androidx.fragment.app.DialogFragment
-import androidx.fragment.app.Fragment
 import android.util.Log
 import android.util.Size
 import android.util.SparseIntArray
-import android.view.LayoutInflater
-import android.view.Surface
-import android.view.SurfaceHolder
-import android.view.SurfaceView
-import android.view.View
-import android.view.ViewGroup
+import android.view.*
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
-import java.util.concurrent.Semaphore
-import java.util.concurrent.TimeUnit
-import kotlin.math.abs
+import androidx.fragment.app.DialogFragment
+import androidx.fragment.app.Fragment
 import org.tensorflow.lite.examples.posenet.lib.BodyPart
 import org.tensorflow.lite.examples.posenet.lib.Person
 import org.tensorflow.lite.examples.posenet.lib.Posenet
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 class PosenetActivity :
   Fragment(),
@@ -83,6 +64,9 @@ class PosenetActivity :
     Pair(BodyPart.RIGHT_HIP, BodyPart.RIGHT_KNEE),
     Pair(BodyPart.RIGHT_KNEE, BodyPart.RIGHT_ANKLE)
   )
+
+  /** Lets us know that mini game involves Push Ups. For Hackathon*/
+  private val workoutType = "pushup"
 
   /** Threshold for confidence score. */
   private val minConfidence = 0.5
@@ -280,9 +264,11 @@ class PosenetActivity :
         // We don't use a front facing camera in this sample.
         val cameraDirection = characteristics.get(CameraCharacteristics.LENS_FACING)
         if (cameraDirection != null &&
-          cameraDirection == CameraCharacteristics.LENS_FACING_FRONT
+          cameraDirection == CameraCharacteristics.LENS_FACING_BACK
         ) {
+
           continue
+
         }
 
         previewSize = Size(PREVIEW_WIDTH, PREVIEW_HEIGHT)
@@ -305,6 +291,7 @@ class PosenetActivity :
           characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
 
         this.cameraId = cameraId
+
 
         // We've found a viable camera and finished setting up member variables,
         // so we don't need to iterate through other available cameras.
@@ -337,7 +324,11 @@ class PosenetActivity :
       if (!cameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
         throw RuntimeException("Time out waiting to lock camera opening.")
       }
-      manager.openCamera(cameraId!!, stateCallback, backgroundHandler)
+      manager.openCamera("1", stateCallback, backgroundHandler)
+
+
+
+
     } catch (e: CameraAccessException) {
       Log.e(TAG, e.toString())
     } catch (e: InterruptedException) {
@@ -435,7 +426,7 @@ class PosenetActivity :
 
       // Create rotated version for portrait display
       val rotateMatrix = Matrix()
-      rotateMatrix.postRotate(90.0f)
+      rotateMatrix.postRotate(270.0f) // 270 degrees for back facing portrait camera. Hackathon stuff
 
       val rotatedBitmap = Bitmap.createBitmap(
         imageBitmap, 0, 0, previewWidth, previewHeight,
@@ -490,8 +481,15 @@ class PosenetActivity :
     paint.textSize = 80.0f
     paint.strokeWidth = 8.0f
   }
-
-  /** Draw bitmap on Canvas.   */
+  /** Based on workout game, find position*/
+  private fun getPosition(person: Person,left: Int,right: Int,top: Int,bottom: Int,widthRatio: Float, heightRatio: Float): String{
+    if (workoutType == "pushup"){
+      var pushup = PushupIdentification()
+      return pushup.identification(person,minConfidence,left,right,top,bottom,widthRatio,heightRatio)
+    }
+    return "Nothing right now..."
+  }
+  /** Draw bitmap on Canvas.*/
   private fun draw(canvas: Canvas, person: Person, bitmap: Bitmap) {
     canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
     // Draw `bitmap` and `person` in square canvas.
@@ -533,9 +531,10 @@ class PosenetActivity :
         val adjustedX: Float = position.x.toFloat() * widthRatio + left
         val adjustedY: Float = position.y.toFloat() * heightRatio + top
         canvas.drawCircle(adjustedX, adjustedY, circleRadius, paint)
+        Log.d("Position1",keyPoint.bodyPart.toString()+" "+adjustedX.toString()+" "+adjustedY.toString())
       }
     }
-
+    /** This block checks if the line has 2 valid points*/
     for (line in bodyJoints) {
       if (
         (person.keyPoints[line.first.ordinal].score > minConfidence) and
@@ -550,25 +549,31 @@ class PosenetActivity :
         )
       }
     }
-
+    var position = getPosition(person,left,right,top,bottom,widthRatio,heightRatio) //Edited for Hackathon
     canvas.drawText(
-      "Score: %.2f".format(person.score),
-      (15.0f * widthRatio),
-      (30.0f * heightRatio + bottom),
-      paint
+            "Position: %s".format(position),
+            (15.0f*widthRatio),
+            (30.0f * heightRatio+bottom),
+            paint
     )
-    canvas.drawText(
-      "Device: %s".format(posenet.device),
-      (15.0f * widthRatio),
-      (50.0f * heightRatio + bottom),
-      paint
-    )
-    canvas.drawText(
-      "Time: %.2f ms".format(posenet.lastInferenceTimeNanos * 1.0f / 1_000_000),
-      (15.0f * widthRatio),
-      (70.0f * heightRatio + bottom),
-      paint
-    )
+//    canvas.drawText(
+//      "Score: %.2f".format(person.score),
+//      (15.0f * widthRatio),
+//      (30.0f * heightRatio + bottom),
+//      paint
+//    )
+//    canvas.drawText(
+//      "Device: %s".format(posenet.device),
+//      (15.0f * widthRatio),
+//      (50.0f * heightRatio + bottom),
+//      paint
+//    )
+//    canvas.drawText(
+//      "Time: %.2f ms".format(posenet.lastInferenceTimeNanos * 1.0f / 1_000_000),
+//      (15.0f * widthRatio),
+//      (70.0f * heightRatio + bottom),
+//      paint
+//    )
 
     // Draw!
     surfaceHolder!!.unlockCanvasAndPost(canvas)
@@ -586,6 +591,7 @@ class PosenetActivity :
     val person = posenet.estimateSinglePose(scaledBitmap)
     val canvas: Canvas = surfaceHolder!!.lockCanvas()
     draw(canvas, person, scaledBitmap)
+
   }
 
   /**
